@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Logic Controller - Simulazione Job Tree</title>
+  <style>
+    :root{--bg:#0b0f13;--panel:#0f1720;--accent:#0fb9a6;--danger:#ff5252;--success:#28c76f;--muted:#9aa5b1}
+    html,body{height:100%;margin:0;background:linear-gradient(180deg,#050607 0%, #0b0f13 100%);font-family:Inter,Segoe UI,Roboto,Arial,sans-serif;color:#e6eef6}
+    .app{display:flex;height:100vh;gap:12px;padding:12px}
+    .canvas-wrap{flex:1;display:flex;flex-direction:column;gap:8px}
+    canvas{background:#101418;border-radius:6px;box-shadow:inset 0 0 0 1px rgba(255,255,255,0.02);display:block}
+    .topbar{display:flex;align-items:center;gap:8px}
+    .banner{height:64px;display:flex;align-items:center;justify-content:center;border-radius:6px;padding:8px 16px;font-weight:800;font-size:22px}
+    .master-pass{background:linear-gradient(90deg,#0b3 30%, #07a06a);color:#02160f}
+    .master-fail{background:linear-gradient(90deg,#f33 30%, #c33);color:#2a0b0b}
+    .controls{display:flex;gap:8px;align-items:center}
+    .btn{background:#08111a;border:1px solid rgba(255,255,255,0.03);padding:8px 12px;border-radius:6px;color:var(--accent);cursor:pointer}
+    .btn.secondary{color:var(--muted);border-color:rgba(255,255,255,0.02)}
+    .sidebar{width:360px;background:linear-gradient(180deg,#071018,#0b1318);border-radius:8px;padding:12px;box-shadow:0 4px 18px rgba(0,0,0,0.6);display:flex;flex-direction:column;gap:12px}
+    h2{margin:0;font-size:14px;color:var(--muted)}
+    .tool-list{display:flex;flex-direction:column;gap:8px;overflow:auto;padding-right:4px}
+    .tool-item{display:flex;justify-content:space-between;padding:8px;border-radius:6px;background:rgba(255,255,255,0.02);align-items:center}
+    .tool-item b{font-weight:700}
+    .small{font-size:12px;color:var(--muted)}
+    .panel{background:rgba(255,255,255,0.02);padding:10px;border-radius:6px}
+    .row{display:flex;gap:8px;align-items:center}
+    input[type=range]{width:100%}
+    .label-muted{color:var(--muted);font-size:12px}
+    .tool-type{padding:6px 8px;border-radius:5px;background:rgba(255,255,255,0.02);font-size:12px}
+    .danger{color:var(--danger)}
+    .success{color:var(--success)}
+    .muted{color:var(--muted)}
+    .kbd{background:#081118;padding:6px;border-radius:4px;border:1px solid rgba(255,255,255,0.02);font-size:12px}
+    .footer{display:flex;gap:8px;align-items:center;justify-content:space-between}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="canvas-wrap">
+      <div class="topbar">
+        <div id="masterBanner" class="banner master-fail">MASTER FALLITO</div>
+        <div style="flex:1"></div>
+        <div class="controls">
+          <label class="kbd">Logica:</label>
+          <select id="logicMode" class="btn secondary">
+            <option value="AND">AND</option>
+            <option value="OR">OR</option>
+          </select>
+            <button id="toggleWebcam" class="btn secondary">Avvia Webcam</button>
+            <button id="addBrightness" class="btn">Aggiungi Luminosità</button>
+            <button id="addPresence" class="btn">Aggiungi Presenza</button>
+            <button id="addPattern" class="btn">Aggiungi Modello</button>
+        </div>
+      </div>
+
+      <canvas id="mainCanvas" width="1200" height="700"></canvas>
+      <div class="small muted">Suggerimenti: Trascina le caselle per spostare. Trascina l'angolo in basso a destra per ridimensionare. Clicca uno strumento per modificarne i limiti.</div>
+    </div>
+
+    <div class="sidebar">
+      <h2>Elenco Strumenti</h2>
+      <div id="toolList" class="tool-list"></div>
+
+      <div class="panel">
+        <div class="row"><b>Strumento Selezionato</b><div style="flex:1"></div><button id="deleteTool" class="btn secondary">Elimina</button></div>
+        <div id="selectedInfo" class="small muted">Nessuno</div>
+        <div id="limitsUI" style="display:none;margin-top:8px">
+          <div class="label-muted">Minimo</div>
+          <input id="minRange" type="range" min="0" max="255" value="0" />
+          <div class="row"><div class="small">Min: <span id="minVal">0</span></div><div style="flex:1"></div></div>
+          <div class="label-muted">Massimo</div>
+          <input id="maxRange" type="range" min="0" max="255" value="255" />
+          <div class="row"><div class="small">Max: <span id="maxVal">255</span></div><div style="flex:1"></div></div>
+          <div id="presenceThresholdUI" style="display:none">
+            <div class="label-muted">Soglia Presenza (luminosità pixel)</div>
+            <input id="presenceThreshold" type="range" min="0" max="255" value="128" />
+            <div class="row"><div class="small">Soglia: <span id="presenceThreshVal">128</span></div></div>
+          </div>
+           <div id="patternUI" style="display:none;margin-top:8px">
+            <div class="row"><button id="trainTemplate" class="btn">Allena Modello</button><div style="flex:1"></div></div>
+            <div class="label-muted">Punteggio Minimo di Corrispondenza</div>
+             <input id="minMatch" type="range" min="0" max="100" value="70" />
+            <div class="row"><div class="small">Punteggio Min: <span id="minMatchVal">70</span>%</div><div style="flex:1"></div></div>
+            <div class="label-muted">Tolleranza Ricerca (px)</div>
+             <input id="searchTol" type="range" min="0" max="32" value="4" />
+            <div class="row"><div class="small">Tolleranza: <span id="searchTolVal">4</span>px</div><div style="flex:1"></div></div>
+            <div style="margin-top:8px;display:flex;gap:8px;align-items:center"><canvas id="patternThumb" width="120" height="80" style="background:#061018;border-radius:4px"></canvas><div class="small muted">Anteprima Modello</div></div>
+           </div>
+        </div>
+      </div>
+
+      <div class="panel footer">
+        <div class="small muted">Stato</div>
+        <div id="globalStatus" class="small danger">MASTER FALLITO</div>
+      </div>
+    </div>
+  </div>
+
+  <video id="video" autoplay playsinline style="display:none"></video>
+
+  <script>
+  // Simple single-file Logic Controller app (webcam stream)
+  const canvas = document.getElementById('mainCanvas');
+    const ctx = canvas.getContext('2d');
+    const toolListEl = document.getElementById('toolList');
+    const masterBanner = document.getElementById('masterBanner');
+    const globalStatusEl = document.getElementById('globalStatus');
+    const logicModeEl = document.getElementById('logicMode');
+
+    const minRange = document.getElementById('minRange');
+    const maxRange = document.getElementById('maxRange');
+    const minVal = document.getElementById('minVal');
+    const maxVal = document.getElementById('maxVal');
+    const presenceThreshold = document.getElementById('presenceThreshold');
+    const presenceThreshVal = document.getElementById('presenceThreshVal');
+    const presenceThresholdUI = document.getElementById('presenceThresholdUI');
+    const limitsUI = document.getElementById('limitsUI');
+    const selectedInfo = document.getElementById('selectedInfo');
+    const deleteBtn = document.getElementById('deleteTool');
+    const trainTemplateBtn = document.getElementById('trainTemplate');
+    const patternUI = document.getElementById('patternUI');
+    const patternThumb = document.getElementById('patternThumb');
+    const minMatch = document.getElementById('minMatch');
+    const minMatchVal = document.getElementById('minMatchVal');
+    const searchTol = document.getElementById('searchTol');
+    const searchTolVal = document.getElementById('searchTolVal');
+
+    const toggleWebcam = document.getElementById('toggleWebcam');
+    const videoEl = document.getElementById('video');
+    let videoStream = null;
+    let nextId = 1;
+    const tools = [];
+    let selectedTool = null;
+    const TYPE_NAMES = { brightness: 'Luminosità', presence: 'Presenza', pattern: 'Modello' };
+    // helpers for pattern matching
+    function drawThumbnail(imgData){
+      const w = patternThumb.width, h = patternThumb.height; const pctx = patternThumb.getContext('2d');
+      pctx.clearRect(0,0,w,h);
+      if(!imgData) return;
+      // create an offscreen canvas to draw scaled
+      const oc = document.createElement('canvas'); oc.width = imgData.width; oc.height = imgData.height;
+      const octx = oc.getContext('2d'); octx.putImageData(imgData,0,0);
+      // scale to thumb while preserving aspect
+      const ar = imgData.width / imgData.height; let dw=w, dh=h; if(ar> w/h){ dw=w; dh = Math.round(w/ar); } else { dh=h; dw = Math.round(h*ar); }
+      pctx.drawImage(oc, 0,0, oc.width, oc.height, (w-dw)/2, (h-dh)/2, dw, dh);
+    }
+
+    function addTool(type){
+      const id = 'Tool_' + (nextId++);
+      const tool = {
+        id,
+        type, // 'brightness' or 'presence'
+        x: 80 + Math.random()*400,
+        y: 60 + Math.random()*200,
+        w: 160 + Math.random()*80,
+        h: 120 + Math.random()*80,
+        min: type === 'brightness' ? 40 : (type==='pattern'?0:5), // brightness 0-255, presence 0-100 (%)
+        max: type === 'brightness' ? 220 : (type==='pattern'?100:95),
+        presenceThresh: 128,
+        value: 0,
+        pass: false,
+        color: '#' + Math.floor(Math.random()*16777215).toString(16)
+      };
+      if(type==='pattern'){
+        tool.pattern = null; // will store ImageData
+        tool.minMatch = 70;
+        tool.searchTol = 4;
+      }
+      tools.push(tool);
+      selectTool(tool);
+      updateToolList();
+    }
+
+    document.getElementById('addBrightness').addEventListener('click', ()=>addTool('brightness'));
+    document.getElementById('addPresence').addEventListener('click', ()=>addTool('presence'));
+    document.getElementById('addPattern').addEventListener('click', ()=>addTool('pattern'));
+
+    toggleWebcam.addEventListener('click', async ()=>{
+      if(videoStream){ // stop
+        stopWebcam(); toggleWebcam.textContent = 'Avvia Webcam';
+      } else {
+        try{
+          const s = await navigator.mediaDevices.getUserMedia({ video: { width: canvas.width, height: canvas.height }, audio: false });
+          videoStream = s; videoEl.srcObject = s; toggleWebcam.textContent = 'Ferma Webcam';
+        }catch(err){ alert('Impossibile accedere alla webcam: '+err.message); }
+      }
+    });
+
+    function stopWebcam(){ if(videoStream){ videoStream.getTracks().forEach(t=>t.stop()); videoStream=null; videoEl.srcObject=null; } }
+
+    function updateToolList(){
+      toolListEl.innerHTML = '';
+      for(const t of tools){
+        const el = document.createElement('div');
+        el.className = 'tool-item';
+        el.innerHTML = `<div><b>${t.id}</b> <span class="small muted">${TYPE_NAMES[t.type]||t.type}</span></div><div class="small">${formatValue(t)} <span style="width:8px;height:8px;display:inline-block;margin-left:8px;border-radius:2px;background:${t.pass? 'var(--success)':'var(--danger)'}"></span></div>`;
+        el.addEventListener('click',(ev)=>{ ev.stopPropagation(); selectTool(t); });
+        toolListEl.appendChild(el);
+      }
+    }
+
+    function formatValue(t){
+      if(t.type==='brightness') return Math.round(t.value) + ' Media';
+      return Math.round(t.value) + '%';
+    }
+
+    function selectTool(t){
+      selectedTool = t;
+      if(!t){ limitsUI.style.display='none'; selectedInfo.textContent='Nessuno'; return; }
+      limitsUI.style.display='block';
+      selectedInfo.textContent = `${t.id} (${TYPE_NAMES[t.type]||t.type})`;
+      if(t.type==='brightness'){
+        minRange.min = 0; minRange.max = 255; maxRange.min = 0; maxRange.max = 255;
+        presenceThresholdUI.style.display='none';
+        patternUI.style.display='none';
+        minRange.value = t.min; maxRange.value = t.max; minVal.textContent = t.min; maxVal.textContent = t.max;
+      } else {
+        // presence uses percent 0-100
+        minRange.min = 0; minRange.max = 100; maxRange.min = 0; maxRange.max = 100;
+        presenceThresholdUI.style.display='block';
+        patternUI.style.display='none';
+        minRange.value = t.min; maxRange.value = t.max; minVal.textContent = t.min; maxVal.textContent = t.max;
+        presenceThreshold.value = t.presenceThresh; presenceThreshVal.textContent = t.presenceThresh;
+      }
+      if(t.type==='pattern'){
+        // pattern uses minMatch (0-100) and searchTol
+        minRange.min = 0; minRange.max = 100; maxRange.min = 0; maxRange.max = 100;
+        presenceThresholdUI.style.display='none';
+        patternUI.style.display='block';
+        minRange.value = t.min; maxRange.value = t.max; minVal.textContent = t.min; maxVal.textContent = t.max;
+        minMatch.value = t.minMatch; minMatchVal.textContent = t.minMatch;
+        searchTol.value = t.searchTol; searchTolVal.textContent = t.searchTol;
+        drawThumbnail(t.pattern);
+      }
+      updateToolList();
+    }
+
+    minRange.addEventListener('input', ()=>{
+      if(!selectedTool) return; selectedTool.min = Number(minRange.value); minVal.textContent = minRange.value; updateToolList();
+    });
+    maxRange.addEventListener('input', ()=>{
+      if(!selectedTool) return; selectedTool.max = Number(maxRange.value); maxVal.textContent = maxRange.value; updateToolList();
+    });
+    presenceThreshold.addEventListener('input', ()=>{
+      if(!selectedTool) return; selectedTool.presenceThresh = Number(presenceThreshold.value); presenceThreshVal.textContent = presenceThreshold.value; updateToolList();
+    });
+    minMatch.addEventListener('input', ()=>{ if(!selectedTool) return; selectedTool.minMatch = Number(minMatch.value); minMatchVal.textContent = minMatch.value; updateToolList(); });
+    searchTol.addEventListener('input', ()=>{ if(!selectedTool) return; selectedTool.searchTol = Number(searchTol.value); searchTolVal.textContent = searchTol.value; updateToolList(); });
+    trainTemplateBtn.addEventListener('click', ()=>{
+      if(!selectedTool) return alert('Seleziona prima uno strumento');
+      const t = selectedTool; const sx=Math.max(0,Math.floor(t.x)), sy=Math.max(0,Math.floor(t.y)), sw=Math.max(1,Math.floor(t.w)), sh=Math.max(1,Math.floor(t.h));
+      try{
+        const imgd = ctx.getImageData(sx,sy,sw,sh);
+        t.pattern = imgd; // store master pattern
+        drawThumbnail(imgd);
+        alert(`${t.id} addestrato (${sw}x${sh})`);
+      }catch(e){ alert('Impossibile acquisire il modello: '+e.message); }
+    });
+    deleteBtn.addEventListener('click', ()=>{
+      if(!selectedTool) return; const idx = tools.indexOf(selectedTool); if(idx>=0) tools.splice(idx,1); selectedTool=null; selectTool(null); updateToolList();
+    });
+
+    // Mouse interactions: drag & resize
+    let dragging = null; let dragOffset = {x:0,y:0}; let resizing = null;
+
+    canvas.addEventListener('mousedown',(e)=>{
+      const pos = getMousePos(e);
+      // iterate topmost first
+      for(let i=tools.length-1;i>=0;i--){
+        const t = tools[i];
+        if(pointInRect(pos,t)){
+          // check bottom-right corner for resize (10px)
+          if(pos.x > t.x + t.w - 12 && pos.y > t.y + t.h - 12){ resizing = t; selectTool(t); return; }
+          dragging = t; dragOffset.x = pos.x - t.x; dragOffset.y = pos.y - t.y; selectTool(t); return;
+        }
+      }
+      // clicked empty
+      selectTool(null);
+    });
+    window.addEventListener('mousemove',(e)=>{
+      if(!dragging && !resizing) return;
+      const pos = getMousePos(e);
+      if(dragging){ dragging.x = pos.x - dragOffset.x; dragging.y = pos.y - dragOffset.y; clampTool(dragging); }
+      if(resizing){ resizing.w = Math.max(24, pos.x - resizing.x); resizing.h = Math.max(24, pos.y - resizing.y); clampTool(resizing); }
+    });
+    window.addEventListener('mouseup',()=>{ dragging=null; resizing=null; });
+
+    function clampTool(t){
+      t.x = Math.max(0, Math.min(canvas.width-8, t.x));
+      t.y = Math.max(0, Math.min(canvas.height-8, t.y));
+      t.w = Math.max(8, Math.min(canvas.width-t.x, t.w));
+      t.h = Math.max(8, Math.min(canvas.height-t.y, t.h));
+    }
+
+    function pointInRect(p,t){ return p.x >= t.x && p.x <= t.x + t.w && p.y >= t.y && p.y <= t.y + t.h; }
+    function getMousePos(e){ const rect = canvas.getBoundingClientRect(); return {x:(e.clientX-rect.left)*(canvas.width/rect.width), y:(e.clientY-rect.top)*(canvas.height/rect.height)} }
+
+    // Simple test background if no image loaded: gradient + grid
+    function drawBackground(){
+      if(videoEl && videoStream && videoEl.readyState >= 2){
+        // draw current video frame to canvas
+        try{ ctx.drawImage(videoEl,0,0,canvas.width,canvas.height); return; }catch(e){}
+      }
+      // synthetic pattern
+      const g = ctx.createLinearGradient(0,0,canvas.width,canvas.height); g.addColorStop(0,'#1b2430'); g.addColorStop(1,'#0b1116');
+      ctx.fillStyle = g; ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.strokeStyle='rgba(255,255,255,0.02)'; ctx.lineWidth = 1;
+      for(let x=0;x<canvas.width;x+=40){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke(); }
+      for(let y=0;y<canvas.height;y+=40){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke(); }
+    }
+
+    function computeToolValue(t){
+      // read image data for the ROI
+      const sx = Math.max(0,Math.floor(t.x)); const sy = Math.max(0,Math.floor(t.y)); const sw = Math.max(1,Math.floor(t.w)); const sh = Math.max(1,Math.floor(t.h));
+      try{
+        const imgd = ctx.getImageData(sx,sy,sw,sh);
+        const data = imgd.data; let sum=0, countAbove=0;
+        for(let i=0;i<data.length;i+=4){
+          const r=data[i], g=data[i+1], b=data[i+2];
+          const gray = 0.299*r + 0.587*g + 0.114*b;
+          sum += gray;
+          if(gray > t.presenceThresh) countAbove++;
+        }
+        const pxCount = sw*sh;
+        if(t.type==='brightness'){
+          const avg = sum/pxCount; t.value = avg; t.pass = (avg >= t.min && avg <= t.max);
+        } else if(t.type==='presence'){
+          const pct = (countAbove/pxCount)*100; t.value = pct; t.pass = (pct >= t.min && pct <= t.max);
+        } else if(t.type==='pattern'){
+          // pattern matching using normalized cross-correlation (NCC)
+          if(!t.pattern){ t.value = 0; t.pass = false; return; }
+          const pat = t.pattern; const pw = pat.width, ph = pat.height;
+          // limit search to a neighborhood defined by searchTol (pixels)
+          const tol = Math.max(0, Math.min(32, t.searchTol || 0));
+          let best = -1;
+          // precompute pattern grayscale array
+          const pgray = new Float32Array(pw*ph);
+          for(let y=0;y<ph;y++){
+            for(let x=0;x<pw;x++){
+              const idx = (y*pw + x)*4; const r=pat.data[idx], g=pat.data[idx+1], b=pat.data[idx+2]; pgray[y*pw + x] = 0.299*r + 0.587*g + 0.114*b;
+            }
+          }
+          // mean subtract pattern
+          let pm=0; for(let i=0;i<pgray.length;i++) pm += pgray[i]; pm /= pgray.length;
+          for(let i=0;i<pgray.length;i++) pgray[i] -= pm;
+          let pnorm = 0; for(let i=0;i<pgray.length;i++) pnorm += pgray[i]*pgray[i]; if(pnorm<=0) pnorm = 1;
+
+          // search offsets within tolerance (clamped to canvas)
+          for(let dy=-tol; dy<=tol; dy++){
+            for(let dx=-tol; dx<=tol; dx++){
+              const cx = sx + dx; const cy = sy + dy;
+              if(cx < 0 || cy < 0 || cx + pw > canvas.width || cy + ph > canvas.height) continue;
+              let cand;
+              try{ cand = ctx.getImageData(cx, cy, pw, ph); }catch(e){ continue; }
+              // compute candidate grayscale and mean-subtract
+              let cm=0; const cgray = new Float32Array(pw*ph);
+              for(let y=0;y<ph;y++) for(let x=0;x<pw;x++){ const idx=(y*pw+x)*4; const r=cand.data[idx], g=cand.data[idx+1], b=cand.data[idx+2]; cgray[y*pw+x] = 0.299*r + 0.587*g + 0.114*b; cm += cgray[y*pw+x]; }
+              cm /= cgray.length; for(let i=0;i<cgray.length;i++) cgray[i] -= cm;
+              // compute numerator and candidate norm
+              let num = 0, cnorm=0;
+              for(let i=0;i<cgray.length;i++){ num += pgray[i]*cgray[i]; cnorm += cgray[i]*cgray[i]; }
+              if(cnorm <= 0) continue;
+              const score = num / Math.sqrt(pnorm * cnorm);
+              if(score > best) best = score;
+            }
+          }
+          // convert best (-1..1) to 0..100%
+          if(best < -1) best = -1; if(best > 1) best = 1;
+          const pct = Math.max(0, ((best + 1) / 2) * 100);
+          t.value = pct; t.pass = (pct >= (t.minMatch || 0));
+        }
+      }catch(e){ /* cross-origin images may cause exceptions */ }
+    }
+
+    function draw(){
+      // continuous loop
+      requestAnimationFrame(draw);
+      // clear
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      drawBackground();
+
+      // update each tool value
+      for(const t of tools){ computeToolValue(t); }
+
+      // render tool overlays
+      for(const t of tools){
+        // fill overlay with semi transparent tint
+        ctx.save();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = t.pass ? 'rgba(40,199,111,0.95)' : 'rgba(255,82,82,0.95)';
+        ctx.fillStyle = t.pass ? 'rgba(40,199,111,0.06)' : 'rgba(255,82,82,0.06)';
+        ctx.fillRect(t.x, t.y, t.w, t.h);
+        ctx.strokeRect(t.x, t.y, t.w, t.h);
+        // corner resize handle
+        ctx.fillStyle='rgba(0,0,0,0.4)'; ctx.fillRect(t.x+t.w-12, t.y+t.h-12, 12,12);
+        // label
+        ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(t.x, t.y-22, 120,20);
+        ctx.fillStyle='white'; ctx.font='12px Arial'; ctx.fillText(`${t.id} ${TYPE_NAMES[t.type]||t.type} - ${formatValue(t)}`, t.x+6, t.y-7);
+        // if pattern tool, draw score overlay
+        if(t.type==='pattern'){
+          ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(t.x, t.y + t.h - 28, t.w, 20);
+          ctx.fillStyle='white'; ctx.font='14px Arial'; ctx.fillText(`Punteggio: ${t.value.toFixed(1)}%`, t.x + 8, t.y + t.h - 12);
+        }
+        ctx.restore();
+      }
+
+      updateUIStatus();
+    }
+
+    function updateUIStatus(){
+      // global logic
+      const mode = logicModeEl.value;
+      let masterPass = (mode==='AND');
+      if(mode==='AND'){
+        for(const t of tools){ if(!t.pass){ masterPass = false; break; } }
+      } else {
+        masterPass = false; for(const t of tools){ if(t.pass){ masterPass = true; break; } }
+      }
+      if(masterPass){ masterBanner.className='banner master-pass'; masterBanner.textContent='MASTER PASSATO'; globalStatusEl.textContent='MASTER PASSATO'; globalStatusEl.className='small success'; }
+      else { masterBanner.className='banner master-fail'; masterBanner.textContent='MASTER FALLITO'; globalStatusEl.textContent='MASTER FALLITO'; globalStatusEl.className='small danger'; }
+      updateToolList();
+    }
+
+    // initialize with a couple of tools
+    addTool('brightness'); addTool('presence');
+    draw();
+
+    // click canvas to select by id if clicking label area
+    canvas.addEventListener('dblclick',(e)=>{
+      const pos = getMousePos(e);
+      for(let i=tools.length-1;i>=0;i--){ const t=tools[i]; if(pointInRect(pos,t)){ selectTool(t); break; } }
+    });
+
+    // ensure UI updates as values change (also handled in draw loop)
+  </script>
+</body>
+</html>
