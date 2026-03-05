@@ -51,6 +51,9 @@
             <button id="addBrightness" class="btn">Aggiungi Luminosità</button>
             <button id="addColor" class="btn">Aggiungi Colore</button>
             <button id="addPattern" class="btn">Aggiungi Modello</button>
+            <button id="saveConfig" class="btn secondary">Salva Config</button>
+            <button id="loadConfig" class="btn secondary">Carica Config</button>
+            <input id="loadConfigFile" type="file" accept=".json" style="display:none">
         </div>
       </div>
 
@@ -164,6 +167,10 @@
     const hueBarCtx = hueBar.getContext('2d');
     const hueBarContainer = document.getElementById('hueBarContainer');
 
+    const saveConfigBtn = document.getElementById('saveConfig');
+    const loadConfigBtn = document.getElementById('loadConfig');
+    const loadConfigFile = document.getElementById('loadConfigFile');
+
     const maskPreviewUI = document.getElementById('maskPreviewUI');
 
     const toggleWebcam = document.getElementById('toggleWebcam');
@@ -224,6 +231,58 @@
     document.getElementById('addBrightness').addEventListener('click', ()=>addTool('brightness'));
     document.getElementById('addColor').addEventListener('click', ()=>addTool('color'));
     document.getElementById('addPattern').addEventListener('click', ()=>addTool('pattern'));
+
+    saveConfigBtn.addEventListener("click", saveConfiguration);
+
+    loadConfigBtn.addEventListener("click", ()=>{
+      loadConfigFile.click();
+    });
+
+    loadConfigFile.addEventListener("change", (e)=>{
+
+      const file = e.target.files[0];
+      if(!file) return;
+
+      const reader = new FileReader();
+
+      reader.onload = function(evt){
+
+        try{
+          const config = JSON.parse(evt.target.result);
+
+          tools.length = 0;
+
+          for(const t of config.tools){
+
+            // restore pattern ImageData if present
+            if(t.pattern && t.pattern.data){
+              const img = new ImageData(
+                new Uint8ClampedArray(t.pattern.data),
+                t.pattern.width,
+                t.pattern.height
+              );
+              t.pattern = img;
+            }
+
+            tools.push(t);
+          }
+
+          nextId = tools.length + 1;
+
+          logicModeEl.value = config.logicMode || "AND";
+
+          selectTool(null);
+          updateToolList();
+
+        }catch(err){
+          alert("File configurazione non valido");
+        }
+
+      };
+
+      reader.readAsText(file);
+
+    });
 
     toggleWebcam.addEventListener('click', async ()=>{
       if(videoStream){ // stop
@@ -641,6 +700,26 @@
 
       hueBarCtx.fillStyle = grad;
       hueBarCtx.fillRect(0,0,w,h);
+    }
+
+    function saveConfiguration(){
+
+      const config = {
+        logicMode: logicModeEl.value,
+        tools: tools
+      };
+
+      const json = JSON.stringify(config);
+
+      const blob = new Blob([json], {type:"application/json"});
+      const url = URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "vision_job.json";
+      a.click();
+
+      URL.revokeObjectURL(url);
     }
   </script>
 </body>
