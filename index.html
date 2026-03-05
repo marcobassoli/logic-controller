@@ -49,7 +49,7 @@
           </select>
             <button id="toggleWebcam" class="btn secondary">Avvia Webcam</button>
             <button id="addBrightness" class="btn">Aggiungi Luminosità</button>
-            <button id="addPresence" class="btn">Aggiungi Presenza</button>
+            <button id="addColor" class="btn">Aggiungi Colore</button>
             <button id="addPattern" class="btn">Aggiungi Modello</button>
         </div>
       </div>
@@ -72,11 +72,6 @@
           <div class="label-muted">Massimo</div>
           <input id="maxRange" type="range" min="0" max="255" value="255" />
           <div class="row"><div class="small">Max: <span id="maxVal">255</span></div><div style="flex:1"></div></div>
-          <div id="presenceThresholdUI" style="display:none">
-            <div class="label-muted">Soglia Presenza (luminosità pixel)</div>
-            <input id="presenceThreshold" type="range" min="0" max="255" value="128" />
-            <div class="row"><div class="small">Soglia: <span id="presenceThreshVal">128</span></div></div>
-          </div>
            <div id="patternUI" style="display:none;margin-top:8px">
             <div class="row"><button id="trainTemplate" class="btn">Allena Modello</button><div style="flex:1"></div></div>
             <div class="label-muted">Punteggio Minimo di Corrispondenza</div>
@@ -87,6 +82,30 @@
             <div class="row"><div class="small">Tolleranza: <span id="searchTolVal">4</span>px</div><div style="flex:1"></div></div>
             <div style="margin-top:8px;display:flex;gap:8px;align-items:center"><canvas id="patternThumb" width="120" height="80" style="background:#061018;border-radius:4px"></canvas><div class="small muted">Anteprima Modello</div></div>
            </div>
+           <div id="maskPreviewUI" style="margin-top:10px">
+            <div class="label-muted">Anteprima Maschera ROI</div>
+            <canvas id="maskPreview" width="240" height="160" style="background:#061018;border-radius:4px"></canvas>
+            <div class="small muted">Bianco = pixel considerato valido</div>
+          </div>
+          <div id="colorUI" style="display:none;margin-top:10px">
+
+          <div id="hueBarContainer" style="margin-top:8px;display:none">
+            <canvas id="hueBar" width="512" height="16" style="width:100%;height:16px;border-radius:3px"></canvas>
+          </div>
+
+          <div class="label-muted">Hue</div>
+          <input id="hMinRange" type="range" min="0" max="360">
+          <input id="hMaxRange" type="range" min="0" max="360">
+          <div class="small">H: <span id="hMinVal"></span> - <span id="hMaxVal"></span></div>
+          <div class="label-muted">Saturation</div>
+          <input id="sMinRange" type="range" min="0" max="255">
+          <input id="sMaxRange" type="range" min="0" max="255">
+          <div class="small">S: <span id="sMinVal"></span> - <span id="sMaxVal"></span></div>
+          <div class="label-muted">Lightness</div>
+          <input id="lMinRange" type="range" min="0" max="255">
+          <input id="lMaxRange" type="range" min="0" max="255">
+          <div class="small">L: <span id="lMinVal"></span> - <span id="lMaxVal"></span></div>
+          </div>
         </div>
       </div>
 
@@ -101,7 +120,7 @@
 
   <script>
   // Simple single-file Logic Controller app (webcam stream)
-  const canvas = document.getElementById('mainCanvas');
+    const canvas = document.getElementById('mainCanvas');
     const ctx = canvas.getContext('2d');
     const toolListEl = document.getElementById('toolList');
     const masterBanner = document.getElementById('masterBanner');
@@ -112,19 +131,40 @@
     const maxRange = document.getElementById('maxRange');
     const minVal = document.getElementById('minVal');
     const maxVal = document.getElementById('maxVal');
-    const presenceThreshold = document.getElementById('presenceThreshold');
-    const presenceThreshVal = document.getElementById('presenceThreshVal');
-    const presenceThresholdUI = document.getElementById('presenceThresholdUI');
     const limitsUI = document.getElementById('limitsUI');
     const selectedInfo = document.getElementById('selectedInfo');
     const deleteBtn = document.getElementById('deleteTool');
     const trainTemplateBtn = document.getElementById('trainTemplate');
     const patternUI = document.getElementById('patternUI');
     const patternThumb = document.getElementById('patternThumb');
+    const maskPreview = document.getElementById('maskPreview');
+    const maskCtx = maskPreview.getContext('2d');
     const minMatch = document.getElementById('minMatch');
     const minMatchVal = document.getElementById('minMatchVal');
     const searchTol = document.getElementById('searchTol');
     const searchTolVal = document.getElementById('searchTolVal');
+
+    const colorUI = document.getElementById('colorUI');
+
+    const hMinRange = document.getElementById('hMinRange');
+    const hMaxRange = document.getElementById('hMaxRange');
+    const sMinRange = document.getElementById('sMinRange');
+    const sMaxRange = document.getElementById('sMaxRange');
+    const lMinRange = document.getElementById('lMinRange');
+    const lMaxRange = document.getElementById('lMaxRange');
+
+    const hMinVal = document.getElementById('hMinVal');
+    const hMaxVal = document.getElementById('hMaxVal');
+    const sMinVal = document.getElementById('sMinVal');
+    const sMaxVal = document.getElementById('sMaxVal');
+    const lMinVal = document.getElementById('lMinVal');
+    const lMaxVal = document.getElementById('lMaxVal');
+
+    const hueBar = document.getElementById('hueBar');
+    const hueBarCtx = hueBar.getContext('2d');
+    const hueBarContainer = document.getElementById('hueBarContainer');
+
+    const maskPreviewUI = document.getElementById('maskPreviewUI');
 
     const toggleWebcam = document.getElementById('toggleWebcam');
     const videoEl = document.getElementById('video');
@@ -132,7 +172,10 @@
     let nextId = 1;
     const tools = [];
     let selectedTool = null;
-    const TYPE_NAMES = { brightness: 'Luminosità', presence: 'Presenza', pattern: 'Modello' };
+    const TYPE_NAMES = { brightness: 'Luminosità', color: 'Colore', pattern: 'Modello' };
+    
+    drawHueBar();
+
     // helpers for pattern matching
     function drawThumbnail(imgData){
       const w = patternThumb.width, h = patternThumb.height; const pctx = patternThumb.getContext('2d');
@@ -150,17 +193,23 @@
       const id = 'Tool_' + (nextId++);
       const tool = {
         id,
-        type, // 'brightness' or 'presence'
+        type,
         x: 80 + Math.random()*400,
         y: 60 + Math.random()*200,
         w: 160 + Math.random()*80,
         h: 120 + Math.random()*80,
-        min: type === 'brightness' ? 40 : (type==='pattern'?0:5), // brightness 0-255, presence 0-100 (%)
-        max: type === 'brightness' ? 220 : (type==='pattern'?100:95),
-        presenceThresh: 128,
+        min: type === 'brightness' ? 40 : 5,
+        max: type === 'brightness' ? 220 : 95,
         value: 0,
         pass: false,
-        color: '#' + Math.floor(Math.random()*16777215).toString(16)
+        color: '#' + Math.floor(Math.random()*16777215).toString(16),
+
+        hMin:0,
+        hMax:360,
+        sMin:0,
+        sMax:255,
+        lMin:0,
+        lMax:255
       };
       if(type==='pattern'){
         tool.pattern = null; // will store ImageData
@@ -173,7 +222,7 @@
     }
 
     document.getElementById('addBrightness').addEventListener('click', ()=>addTool('brightness'));
-    document.getElementById('addPresence').addEventListener('click', ()=>addTool('presence'));
+    document.getElementById('addColor').addEventListener('click', ()=>addTool('color'));
     document.getElementById('addPattern').addEventListener('click', ()=>addTool('pattern'));
 
     toggleWebcam.addEventListener('click', async ()=>{
@@ -211,39 +260,94 @@
       limitsUI.style.display='block';
       selectedInfo.textContent = `${t.id} (${TYPE_NAMES[t.type]||t.type})`;
       if(t.type==='brightness'){
+        hueBarContainer.style.display='none';
+        maskPreviewUI.style.display = 'block';
         minRange.min = 0; minRange.max = 255; maxRange.min = 0; maxRange.max = 255;
-        presenceThresholdUI.style.display='none';
         patternUI.style.display='none';
         minRange.value = t.min; maxRange.value = t.max; minVal.textContent = t.min; maxVal.textContent = t.max;
-      } else {
-        // presence uses percent 0-100
-        minRange.min = 0; minRange.max = 100; maxRange.min = 0; maxRange.max = 100;
-        presenceThresholdUI.style.display='block';
-        patternUI.style.display='none';
-        minRange.value = t.min; maxRange.value = t.max; minVal.textContent = t.min; maxVal.textContent = t.max;
-        presenceThreshold.value = t.presenceThresh; presenceThreshVal.textContent = t.presenceThresh;
+      } 
+      if(t.type === 'color'){
+
+        hueBarContainer.style.display='block';
+        maskPreviewUI.style.display = 'block';
+
+        colorUI.style.display = 'block';
+        patternUI.style.display = 'none';
+
+        hMinRange.value = t.hMin;
+        hMaxRange.value = t.hMax;
+        sMinRange.value = t.sMin;
+        sMaxRange.value = t.sMax;
+        lMinRange.value = t.lMin;
+        lMaxRange.value = t.lMax;
+
+        hMinVal.textContent = t.hMin;
+        hMaxVal.textContent = t.hMax;
+        sMinVal.textContent = t.sMin;
+        sMaxVal.textContent = t.sMax;
+        lMinVal.textContent = t.lMin;
+        lMaxVal.textContent = t.lMax;
+      }
+      else{
+        colorUI.style.display = 'none';
       }
       if(t.type==='pattern'){
+        maskPreviewUI.style.display = 'none';
         // pattern uses minMatch (0-100) and searchTol
         minRange.min = 0; minRange.max = 100; maxRange.min = 0; maxRange.max = 100;
-        presenceThresholdUI.style.display='none';
         patternUI.style.display='block';
         minRange.value = t.min; maxRange.value = t.max; minVal.textContent = t.min; maxVal.textContent = t.max;
         minMatch.value = t.minMatch; minMatchVal.textContent = t.minMatch;
         searchTol.value = t.searchTol; searchTolVal.textContent = t.searchTol;
         drawThumbnail(t.pattern);
       }
+      if(!t || t.type !== 'brightness'){
+        maskCtx.clearRect(0,0,maskPreview.width,maskPreview.height);
+      }
       updateToolList();
     }
+
+    hMinRange.addEventListener('input',()=>{
+      if(!selectedTool) return;
+      selectedTool.hMin = Number(hMinRange.value);
+      hMinVal.textContent = selectedTool.hMin;
+    });
+
+    hMaxRange.addEventListener('input',()=>{
+      if(!selectedTool) return;
+      selectedTool.hMax = Number(hMaxRange.value);
+      hMaxVal.textContent = selectedTool.hMax;
+    });
+
+    sMinRange.addEventListener('input',()=>{
+      if(!selectedTool) return;
+      selectedTool.sMin = Number(sMinRange.value);
+      sMinVal.textContent = selectedTool.sMin;
+    });
+
+    sMaxRange.addEventListener('input',()=>{
+      if(!selectedTool) return;
+      selectedTool.sMax = Number(sMaxRange.value);
+      sMaxVal.textContent = selectedTool.sMax;
+    });
+
+    lMinRange.addEventListener('input',()=>{
+      if(!selectedTool) return;
+      selectedTool.lMin = Number(lMinRange.value);
+      lMinVal.textContent = selectedTool.lMin;
+    });
+
+    lMaxRange.addEventListener('input',()=>{
+      if(!selectedTool) return;
+      selectedTool.lMax = Number(lMaxRange.value);
+      lMaxVal.textContent = selectedTool.lMax;
+    });
 
     minRange.addEventListener('input', ()=>{
       if(!selectedTool) return; selectedTool.min = Number(minRange.value); minVal.textContent = minRange.value; updateToolList();
     });
     maxRange.addEventListener('input', ()=>{
       if(!selectedTool) return; selectedTool.max = Number(maxRange.value); maxVal.textContent = maxRange.value; updateToolList();
-    });
-    presenceThreshold.addEventListener('input', ()=>{
-      if(!selectedTool) return; selectedTool.presenceThresh = Number(presenceThreshold.value); presenceThreshVal.textContent = presenceThreshold.value; updateToolList();
     });
     minMatch.addEventListener('input', ()=>{ if(!selectedTool) return; selectedTool.minMatch = Number(minMatch.value); minMatchVal.textContent = minMatch.value; updateToolList(); });
     searchTol.addEventListener('input', ()=>{ if(!selectedTool) return; selectedTool.searchTol = Number(searchTol.value); searchTolVal.textContent = searchTol.value; updateToolList(); });
@@ -252,6 +356,10 @@
       const t = selectedTool; const sx=Math.max(0,Math.floor(t.x)), sy=Math.max(0,Math.floor(t.y)), sw=Math.max(1,Math.floor(t.w)), sh=Math.max(1,Math.floor(t.h));
       try{
         const imgd = ctx.getImageData(sx,sy,sw,sh);
+
+        if(selectedTool === t && t.type === 'brightness'){
+          updateMaskPreview(imgd, t);
+        }
         t.pattern = imgd; // store master pattern
         drawThumbnail(imgd);
         alert(`${t.id} addestrato (${sw}x${sh})`);
@@ -315,18 +423,30 @@
       const sx = Math.max(0,Math.floor(t.x)); const sy = Math.max(0,Math.floor(t.y)); const sw = Math.max(1,Math.floor(t.w)); const sh = Math.max(1,Math.floor(t.h));
       try{
         const imgd = ctx.getImageData(sx,sy,sw,sh);
+
+        if(selectedTool === t && (t.type === 'color' || t.type === 'brightness')){
+          updateMaskPreview(imgd, t);
+        }
         const data = imgd.data; let sum=0, countAbove=0;
         for(let i=0;i<data.length;i+=4){
           const r=data[i], g=data[i+1], b=data[i+2];
           const gray = 0.299*r + 0.587*g + 0.114*b;
           sum += gray;
-          if(gray > t.presenceThresh) countAbove++;
+          if(t.type==='color'){
+            const [h,s,l] = rgbToHsl(r,g,b);
+            if(h >= t.hMin && h <= t.hMax && s >= t.sMin && s <= t.sMax && l >= t.lMin && l <= t.lMax){
+              countAbove++;
+            }
+          }
         }
         const pxCount = sw*sh;
+
         if(t.type==='brightness'){
           const avg = sum/pxCount; t.value = avg; t.pass = (avg >= t.min && avg <= t.max);
-        } else if(t.type==='presence'){
-          const pct = (countAbove/pxCount)*100; t.value = pct; t.pass = (pct >= t.min && pct <= t.max);
+        } else if(t.type==='color'){
+          const pct = (countAbove / pxCount) * 100;
+          t.value = pct;
+          t.pass = (pct >= t.min && pct <= t.max);
         } else if(t.type==='pattern'){
           // pattern matching using normalized cross-correlation (NCC)
           if(!t.pattern){ t.value = 0; t.pass = false; return; }
@@ -423,7 +543,6 @@
     }
 
     // initialize with a couple of tools
-    addTool('brightness'); addTool('presence');
     draw();
 
     // click canvas to select by id if clicking label area
@@ -433,6 +552,96 @@
     });
 
     // ensure UI updates as values change (also handled in draw loop)
+
+    function updateMaskPreview(imgd, tool){
+      if(!imgd || !tool) return;
+
+      const w = imgd.width;
+      const h = imgd.height;
+
+      const mask = new ImageData(w,h);
+      const src = imgd.data;
+      const dst = mask.data;
+
+      for(let i=0;i<src.length;i+=4){
+        const r = src[i];
+        const g = src[i+1];
+        const b = src[i+2];
+
+        const gray = 0.299*r + 0.587*g + 0.114*b;
+
+        let active = false;
+
+        if(tool.type === 'color'){
+          const [h,s,l] = rgbToHsl(r,g,b);
+          active = h >= tool.hMin && h <= tool.hMax && s >= tool.sMin && s <= tool.sMax && l >= tool.lMin && l <= tool.lMax;
+        }
+        else if(tool.type === 'brightness'){
+          active = gray >= tool.min && gray <= tool.max;
+        }
+
+        const v = active ? 255 : 0;
+
+        dst[i] = v;
+        dst[i+1] = v;
+        dst[i+2] = v;
+        dst[i+3] = 255;
+      }
+
+      // draw scaled to preview canvas
+      const off = document.createElement('canvas');
+      off.width = w;
+      off.height = h;
+
+      const offctx = off.getContext('2d');
+      offctx.putImageData(mask,0,0);
+
+      maskCtx.clearRect(0,0,maskPreview.width,maskPreview.height);
+      maskCtx.drawImage(off,0,0,maskPreview.width,maskPreview.height);
+    }
+
+    function rgbToHsl(r,g,b){
+      r/=255; g/=255; b/=255;
+      const max = Math.max(r,g,b);
+      const min = Math.min(r,g,b);
+      let h,s,l = (max+min)/2;
+      if(max===min){
+        h = s = 0;
+      }else{
+        const d = max-min;
+        s = l>0.5 ? d/(2-max-min) : d/(max+min);
+        switch(max){
+          case r: h = (g-b)/d + (g<b ? 6:0); break;
+          case g: h = (b-r)/d + 2; break;
+          case b: h = (r-g)/d + 4; break;
+        }
+        h/=6;
+      }
+
+      return [
+        h*360,
+        s*255,
+        l*255
+      ];
+    }
+
+    function drawHueBar(){
+      const w = hueBar.width;
+      const h = hueBar.height;
+
+      const grad = hueBarCtx.createLinearGradient(0,0,w,0);
+
+      grad.addColorStop(0.0,"red");
+      grad.addColorStop(0.17,"yellow");
+      grad.addColorStop(0.33,"lime");
+      grad.addColorStop(0.50,"cyan");
+      grad.addColorStop(0.67,"blue");
+      grad.addColorStop(0.83,"magenta");
+      grad.addColorStop(1.0,"red");
+
+      hueBarCtx.fillStyle = grad;
+      hueBarCtx.fillRect(0,0,w,h);
+    }
   </script>
 </body>
 </html>
