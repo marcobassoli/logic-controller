@@ -53,6 +53,7 @@
             <button id="addPattern" class="btn">Aggiungi Modello</button>
             <button id="saveConfig" class="btn secondary">Salva Config</button>
             <button id="loadConfig" class="btn secondary">Carica Config</button>
+            <button id="visionReport" class="btn secondary">Vision Report PDF</button>
             <input id="loadConfigFile" type="file" accept=".json" style="display:none">
         </div>
       </div>
@@ -121,6 +122,8 @@
 
   <video id="video" autoplay playsinline style="display:none"></video>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
   <script>
   // Simple single-file Logic Controller app (webcam stream)
     const canvas = document.getElementById('mainCanvas');
@@ -170,6 +173,7 @@
     const saveConfigBtn = document.getElementById('saveConfig');
     const loadConfigBtn = document.getElementById('loadConfig');
     const loadConfigFile = document.getElementById('loadConfigFile');
+    const visionReportBtn = document.getElementById("visionReport");
 
     const maskPreviewUI = document.getElementById('maskPreviewUI');
 
@@ -233,6 +237,7 @@
     document.getElementById('addPattern').addEventListener('click', ()=>addTool('pattern'));
 
     saveConfigBtn.addEventListener("click", saveConfiguration);
+    visionReportBtn.addEventListener("click", generateVisionReport);
 
     loadConfigBtn.addEventListener("click", ()=>{
       loadConfigFile.click();
@@ -720,6 +725,66 @@
       a.click();
 
       URL.revokeObjectURL(url);
+    }
+
+    function generateVisionReport(){
+
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF();
+
+      const canvasImage = canvas.toDataURL("image/png");
+
+      const pageWidth = pdf.internal.pageSize.getWidth();
+
+      pdf.setFontSize(18);
+      pdf.text("Vision Inspection Report", 10, 15);
+
+      pdf.setFontSize(10);
+      pdf.text("Date: " + new Date().toLocaleString(), 10, 22);
+
+      // image
+      pdf.addImage(canvasImage,"PNG",10,30,pageWidth-20,90);
+
+      let y = 130;
+
+      pdf.setFontSize(14);
+      pdf.text("Tool Results",10,y);
+
+      y += 8;
+
+      pdf.setFontSize(10);
+
+      tools.forEach((t,i)=>{
+
+        const status = t.pass ? "PASS" : "FAIL";
+
+        pdf.text(
+          `Tool ${t.id} (${t.type})  Value: ${t.value.toFixed(2)}  → ${status}`,
+          10,
+          y
+        );
+
+        y += 6;
+
+        if(y > 270){
+          pdf.addPage();
+          y = 20;
+        }
+
+      });
+
+      // global result
+      const allPass = tools.every(t=>t.pass);
+
+      pdf.setFontSize(14);
+      pdf.text(
+        "Overall Result: " + (allPass ? "PASS" : "FAIL"),
+        10,
+        y + 10
+      );
+
+      pdf.save("vision_report.pdf");
+
     }
   </script>
 </body>
